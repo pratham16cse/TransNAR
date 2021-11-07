@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from loss.dilate_loss import dilate_loss
-from eval import eval_base_model, eval_index_model
+from eval import eval_base_model
 import time
 from models.base_models import get_base_model
 from utils import DataProcessor

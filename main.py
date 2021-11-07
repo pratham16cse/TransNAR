@@ -4,11 +4,10 @@ import argparse
 import numpy as np
 import torch
 from data.synthetic_dataset import create_synthetic_dataset, SyntheticDataset
-from models.base_models import EncoderRNN, DecoderRNN, Net_GRU, NetFullyConnected, get_base_model
-from models.index_models import get_index_model
+from models.base_models import get_base_model
 from loss.dilate_loss import dilate_loss
 from train import train_model, get_optimizer
-from eval import eval_base_model, eval_inf_model, eval_inf_index_model, eval_aggregates
+from eval import eval_base_model, eval_inf_model, eval_aggregates
 from torch.utils.data import DataLoader
 import random
 from tslearn.metrics import dtw, dtw_path
@@ -24,7 +23,7 @@ import itertools
 
 from functools import partial
 
-from models import inf_models, inf_index_models
+from models import inf_models
 import utils
 
 os.environ["TUNE_GLOBAL_CHECKPOINT_S"] = "1000000"
@@ -117,7 +116,7 @@ parser.add_argument('--use_coeffs', action='store_true', default=False,
 parser.add_argument('--L', type=int, default=2,
                     help='number of levels in the hierarchy, leaves inclusive')
 
-parser.add_argument('--K_list', type=int, nargs='*', default=[],
+parser.add_argument('--K_list', type=int, nargs='*', default=[1],
                     help='List of bin sizes of each aggregation')
 
 parser.add_argument('--wavelet_levels', type=int, default=2,
@@ -171,19 +170,10 @@ args = parser.parse_args()
 #args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 args.base_model_names = [
-#    'seq2seqdilate',
-#    'seq2seqnll',
-#    'seq2seqmse',
-#    'convmse',
-#    'convmsenonar',
-#    'convnll',
-#    'rnn-aggnll-nar',
 #    'rnn-q-nar',
 #    'rnn-q-ar',
 #    'trans-mse-nar',
 #    'trans-q-nar',
-#    'nbeats-mse-nar',
-#    'nbeatsd-mse-nar'
 #    'rnn-mse-ar',
 #    'rnn-nll-ar',
 #    'trans-mse-ar',
@@ -199,170 +189,60 @@ args.base_model_names = [
 #    'rnn-mse-nar',
 #    'rnn-nll-nar',
 #    'rnn-fnll-nar',
-#    'transm-nll-nar',
-#    'transm-fnll-nar',
-#    'transda-nll-nar',
-#    'transda-fnll-nar',
 #    'oracle',
 #    'oracleforecast'
 #    'transsig-nll-nar',
 ]
 args.aggregate_methods = [
     'sum',
-#    'sumwithtrend',
     'slope',
-#    'haar',
-#    'wavelet'
 ]
 
 args.inference_model_names = []
-if 'seq2seqdilate' in args.base_model_names:
-    args.inference_model_names.append('DILATE')
-if 'seq2seqmse' in args.base_model_names:
-    args.inference_model_names.append('MSE')
-    args.inference_model_names.append('seq2seqmse_dualtpp')
-    args.inference_model_names.append('seq2seqmse_optst')
-    args.inference_model_names.append('seq2seqmse_opttrend')
-if 'seq2seqnll' in args.base_model_names:
-    args.inference_model_names.append('NLL')
-    args.inference_model_names.append('seq2seqnll_dualtpp')
-    args.inference_model_names.append('seq2seqnll_optst')
-    args.inference_model_names.append('seq2seqnll_opttrend')
-    #args.inference_model_names.append('seq2seqnll_optklst')
-    #args.inference_model_names.append('seq2seqnll_optkls')
-    #args.inference_model_names.append('seq2seqnll_optklt')
-if 'convmse' in args.base_model_names:
-    args.inference_model_names.append('CNNRNN-MSE')
-    args.inference_model_names.append('convmse_dualtpp')
-    #args.inference_model_names.append('convmse_dualtpp_cf')
-    #args.inference_model_names.append('convmse_optst')
-    #args.inference_model_names.append('convmse_opttrend')
-if 'convnll' in args.base_model_names:
-    args.inference_model_names.append('CNNRNN-NLL')
-    args.inference_model_names.append('convnll_dualtpp')
-    #args.inference_model_names.append('convnll_optst')
-    #args.inference_model_names.append('convnll_opttrend')
-    #args.inference_model_names.append('convnll_optklst')
-    #args.inference_model_names.append('convnll_optkls')
-if 'convmsenonar' in args.base_model_names:
-    args.inference_model_names.append('CNNRNN-NONAR-MSE')
-    args.inference_model_names.append('convmse_nonar_dualtpp')
-    #args.inference_model_names.append('convmse_nonar_dualtpp_cf')
-    #args.inference_model_names.append('convmse_optst')
-    #args.inference_model_names.append('convmse_opttrend')
-   #args.inference_model_names.append('convnll_optklt')
-if 'rnn-aggnll-nar' in args.base_model_names:
-    args.inference_model_names.append('RNN-AGGNLL-NAR')
 if 'rnn-q-nar' in args.base_model_names:
     args.inference_model_names.append('RNN-Q-NAR')
 if 'rnn-mse-ar' in args.base_model_names:
     args.inference_model_names.append('RNN-MSE-AR')
-    args.inference_model_names.append('rnn-mse-ar_opt-st')
 if 'rnn-q-ar' in args.base_model_names:
     args.inference_model_names.append('RNN-Q-AR')
 if 'trans-mse-nar' in args.base_model_names:
     args.inference_model_names.append('TRANS-MSE-NAR')
-    #args.inference_model_names.append('convmse_nonar_dualtpp')
 if 'trans-q-nar' in args.base_model_names:
     args.inference_model_names.append('TRANS-Q-NAR')
-    #args.inference_model_names.append('convmse_nonar_dualtpp')
-if 'nbeats-mse-nar' in args.base_model_names:
-    args.inference_model_names.append('NBEATS-MSE-NAR')
-if 'nbeatsd-mse-nar' in args.base_model_names:
-    args.inference_model_names.append('NBEATSD-MSE-NAR')
 if 'rnn-mse-nar' in args.base_model_names:
     args.inference_model_names.append('RNN-MSE-NAR')
-    #args.inference_model_names.append('rnn-mse-nar_opt-sum')
-    #args.inference_model_names.append('rnn-mse-nar_optcf-sum')
-    #args.inference_model_names.append('rnn-mse-nar_opt-slope')
-    #args.inference_model_names.append('rnn-mse-nar_kl-sum')
-    #args.inference_model_names.append('rnn-mse-nar_kl-st')
 if 'rnn-nll-nar' in args.base_model_names:
     args.inference_model_names.append('RNN-NLL-NAR')
-    #args.inference_model_names.append('rnn-nll-nar_opt-sum')
-    #args.inference_model_names.append('rnn-nll-nar_optcf-sum')
-    #args.inference_model_names.append('rnn-nll-nar_opt-slope')
-    #args.inference_model_names.append('rnn-nll-nar_opt-st')
-    #args.inference_model_names.append('rnn-nll-nar_kl-sum')
-    args.inference_model_names.append('rnn-nll-nar_kl-st')
 if 'rnn-nll-ar' in args.base_model_names:
     args.inference_model_names.append('RNN-NLL-AR')
-    #args.inference_model_names.append('rnn-nll-ar_opt-sum')
-    #args.inference_model_names.append('rnn-nll-ar_opt-slope')
-    #args.inference_model_names.append('rnn-nll-ar_opt-st')
-    #args.inference_model_names.append('rnn-nll-ar_kl-sum')
-    args.inference_model_names.append('rnn-nll-ar_opt-st')
-    args.inference_model_names.append('rnn-nll-ar_kl-st')
 if 'trans-mse-ar' in args.base_model_names:
     args.inference_model_names.append('TRANS-MSE-AR')
 if 'trans-nll-ar' in args.base_model_names:
     args.inference_model_names.append('TRANS-NLL-AR')
-    args.inference_model_names.append('trans-nll-ar_opt-sum')
-    #args.inference_model_names.append('trans-nll-ar_optcf-sum')
-    #args.inference_model_names.append('trans-nll-ar_optcf-slope')
-    #args.inference_model_names.append('trans-nll-ar_optcf-haar')
-    #args.inference_model_names.append('trans-nll-ar_optcf-st')
-    #args.inference_model_names.append('trans-nll-ar_opt-slope')
-    args.inference_model_names.append('trans-nll-ar_opt-st')
-    args.inference_model_names.append('trans-nll-ar_kl-sum')
-    args.inference_model_names.append('trans-nll-ar_kl-st')
-    args.inference_model_names.append('trans-nll-ar_covkl-sum')
-    args.inference_model_names.append('trans-nll-ar_covkl-st')
 if 'gpt-nll-ar' in args.base_model_names:
     args.inference_model_names.append('GPT-NLL-AR')
-    args.inference_model_names.append('gpt-nll-ar_opt-st')
-    args.inference_model_names.append('gpt-nll-ar_kl-st')
 if 'gpt-mse-ar' in args.base_model_names:
     args.inference_model_names.append('GPT-MSE-AR')
 if 'gpt-nll-nar' in args.base_model_names:
     args.inference_model_names.append('GPT-NLL-NAR')
-    args.inference_model_names.append('gpt-nll-nar_opt-st')
-    args.inference_model_names.append('gpt-nll-nar_kl-st')
 if 'gpt-mse-nar' in args.base_model_names:
     args.inference_model_names.append('GPT-MSE-NAR')
 if 'informer-mse-nar' in args.base_model_names:
     args.inference_model_names.append('INFORMER-MSE-NAR')
 if 'trans-bvnll-ar' in args.base_model_names:
     args.inference_model_names.append('TRANS-BVNLL-AR')
-    #args.inference_model_names.append('trans-bvnll-ar_opt-sum')
-    args.inference_model_names.append('trans-bvnll-ar_optcf-sum')
-    args.inference_model_names.append('trans-bvnll-ar_optcf-slope')
-    #args.inference_model_names.append('trans-bvnll-ar_optcf-haar')
-    args.inference_model_names.append('trans-bvnll-ar_optcf-st')
-    #args.inference_model_names.append('trans-bvnll-ar_opt-slope')
-    #args.inference_model_names.append('trans-bvnll-ar_opt-st')
-    #args.inference_model_names.append('trans-bvnll-ar_kl-sum')
-    #args.inference_model_names.append('trans-bvnll-ar_kl-st')
 if 'trans-nll-atr' in args.base_model_names:
     args.inference_model_names.append('TRANS-NLL-ATR')
 if 'trans-fnll-ar' in args.base_model_names:
     args.inference_model_names.append('TRANS-FNLL-AR')
-   #args.inference_model_names.append('trans-nll-ar_kl-st')
 if 'rnn-fnll-nar' in args.base_model_names:
     args.inference_model_names.append('RNN-FNLL-NAR')
-if 'transm-nll-nar' in args.base_model_names:
-    args.inference_model_names.append('TRANSM-NLL-NAR')
-if 'transm-fnll-nar' in args.base_model_names:
-    args.inference_model_names.append('TRANSM-FNLL-NAR')
-if 'transda-nll-nar' in args.base_model_names:
-    args.inference_model_names.append('TRANSDA-NLL-NAR')
-if 'transda-fnll-nar' in args.base_model_names:
-    args.inference_model_names.append('TRANSDA-FNLL-NAR')
 if 'oracle' in args.base_model_names:
     args.inference_model_names.append('oracle')
 if 'oracleforecast' in args.base_model_names:
     args.inference_model_names.append('SimRetrieval')
 if 'transsig-nll-nar' in args.base_model_names:
     args.inference_model_names.append('TRANSSIG-NLL-NAR')
-
-
-
-
-if args.dataset_name in ['Traffic']:
-    args.alpha = 0.8
-
-if args.dataset_name in ['ECG5000']:
-    args.teacher_forcing_ratio = 0.0
 
 if args.dataset_name in ['Solar']:
     opt_normspace = False
@@ -374,8 +254,6 @@ if args.dataset_name == 'ett':
     if args.epochs == -1: args.epochs = 20
     if args.N_input == -1: args.N_input = 192
     if args.N_output == -1: args.N_output = 192
-    if args.K_list == []: args.K_list = []
-    #args.K_list = [6]
     if args.saved_models_dir is None:
         args.saved_models_dir = 'saved_models_ett_d192_b24_e192_corrshuffle_bs128_seplayers_nodeczeros_nodecconv_t2v_usefeats_t2vglobal_idx_val20'
     if args.output_dir is None:
@@ -395,39 +273,12 @@ if args.dataset_name == 'ett':
     if args.lr_inf == -1: args.lr_inf = 0.01
     if args.kernel_size == -1: args.kernel_size = 10
     if args.nkernel == -1: args.nkernel = 32
-    #python main.py ett --epochs 20 --N_input 192 --N_output 192 --K_list 6 --saved_models_dir saved_models_ett_d192 --output_dir Outputs_ett_d192_klnorm --normalize zscore_per_series --learning_rate 0.0001 --batch_size 64 --hidden_size 128 --num_grulstm_layers 1 --device cuda:0
     args.freq = '15min'
-
-elif args.dataset_name == 'taxi30min':
-    if args.epochs == -1: args.epochs = 20
-    if args.N_input == -1: args.N_input = 336
-    if args.N_output == -1: args.N_output = 168
-    #args.K_list = [12]
-    if args.K_list == []: args.K_list = []
-    if args.saved_models_dir is None:
-        args.saved_models_dir = 'saved_models_taxi30min_d168_b48_pefix_e336_corrshuffle_bs128_seplayers_nodeczeros_nodecconv_t2vglobal_mdh_parti'
-    if args.output_dir is None:
-        args.output_dir = 'Outputs_taxi30min_d168_klnorm_b48_pefix_e336_corrshuffle_bs128_seplayers_nodeczeros_nodecconv_t2vglobal_mdh_parti'
-    if args.normalize is None: args.normalize = 'zscore_per_series'
-    if args.learning_rate == -1.: args.learning_rate = 0.0001
-    if args.batch_size == -1: args.batch_size = 128
-    if args.hidden_size == -1: args.hidden_size = 128
-    if args.num_grulstm_layers == -1: args.num_grulstm_layers = 1
-    if args.v_dim == -1: args.v_dim = 4
-    if args.b == -1: args.b = 24
-    #args.t2v_type = 'mdh_parti'
-    if args.device is None: args.device = 'cuda:2'
-    if args.cv_inf == -1: args.cv_inf = 1
-    if args.lr_inf == -1: args.lr_inf = 0.01
-    if args.kernel_size == -1: args.kernel_size = 10
-    if args.nkernel == -1: args.nkernel = 32
 
 elif args.dataset_name == 'etthourly':
     if args.epochs == -1: args.epochs = 50
     if args.N_input == -1: args.N_input = 168
     if args.N_output == -1: args.N_output = 168
-    #args.K_list = [12]
-    if args.K_list == []: args.K_list = []
     if args.saved_models_dir is None:
         args.saved_models_dir = 'saved_models_etthourly_noextrafeats_d168_b24_pefix_e168_val20_corrshuffle_seplayers_nodeczeros_nodecconv_t2v'
     if args.output_dir is None:
@@ -449,37 +300,10 @@ elif args.dataset_name == 'etthourly':
     if args.nkernel == -1: args.nkernel = 32
     args.freq = 'h'
 
-elif args.dataset_name == 'azure':
-    if args.epochs == -1: args.epochs = 20
-    if args.N_input == -1: args.N_input = 720
-    if args.N_output == -1: args.N_output = 360
-    #args.K_list = [60]
-    if args.K_list == []: args.K_list = []
-    if args.saved_models_dir is None:
-        args.saved_models_dir = 'saved_models_azure_d360_e720_usefeats_bs128_normsame'
-    if args.output_dir is None:   
-        args.output_dir = 'Outputs_azure_d360_e720_usefeats_bs128_normsame'
-    #args.normalize = 'zscore_per_series'
-    if args.normalize is None: args.normalize = 'same'
-    if args.learning_rate == -1: args.learning_rate = 0.0001
-    if args.batch_size == -1: args.batch_size = 128
-    if args.hidden_size == -1: args.hidden_size = 128
-    if args.num_grulstm_layers == -1: args.num_grulstm_layers = 1
-    if args.v_dim == -1: args.v_dim = 4
-    if args.b == -1: args.b = 10
-    if args.use_feats == -1: args.use_feats = 1
-    #args.t2v_type = None
-    if args.device is None: args.device = 'cuda:0'
-    if args.cv_inf == -1: args.cv_inf = 1
-    if args.kernel_size == -1: args.kernel_size = 10
-    if args.nkernel == -1: args.nkernel = 32
-
 elif args.dataset_name == 'Solar':
     if args.epochs == -1: args.epochs = 20
     if args.N_input == -1: args.N_input = 336
     if args.N_output == -1: args.N_output = 168
-    #args.K_list = [12]
-    if args.K_list == []: args.K_list = []
     if args.saved_models_dir is None:
         args.saved_models_dir = 'saved_models_Solar_d168_b4_e336_corrshuffle_seplayers_nodeczeros_nodecconv_t2v'
     if args.output_dir is None:
@@ -504,8 +328,6 @@ elif args.dataset_name == 'electricity':
     if args.epochs == -1: args.epochs = 20
     if args.N_input == -1: args.N_input = 336
     if args.N_output == -1: args.N_output = 168
-    #args.K_list = [12]
-    if args.K_list == []: args.K_list = []
     if args.saved_models_dir is None:
         args.saved_models_dir = 'saved_models_electricity'
     if args.output_dir is None:
@@ -530,8 +352,6 @@ elif args.dataset_name == 'aggtest':
     if args.epochs == -1: args.epochs = 20
     if args.N_input == -1: args.N_input = 20
     if args.N_output == -1: args.N_output = 10
-    #args.K_list = [12]
-    if args.K_list == []: args.K_list = [1, 5]
     if args.saved_models_dir is None:
         args.saved_models_dir = 'saved_models_aggtest_test'
     if args.output_dir is None:
@@ -551,28 +371,10 @@ elif args.dataset_name == 'aggtest':
     if args.nkernel == -1: args.nkernel = 32
 
 
-elif args.dataset_name == 'Traffic911':
-    args.epochs = 20
-    args.N_input = 336
-    args.N_output = 168
-    args.K_list = [6]
-    args.saved_models_dir = 'saved_models_Traffic911_d168'
-    args.output_dir = 'Outputs_Traffic911_d168'
-    args.normalize = 'zscore_per_series'
-    args.learning_rate = 0.0001
-    args.batch_size = 128
-    args.hidden_size = 128
-    args.num_grulstm_layers = 1
-    args.v_dim = 1
-    args.print_every = 5 # TODO: Only for aggregate models
-    args.device = 'cuda:0'
-
 elif args.dataset_name == 'foodinflation':
     if args.epochs == -1: args.epochs = 50
     if args.N_input == -1: args.N_input = 90
     if args.N_output == -1: args.N_output = 30
-    #args.K_list = [12]
-    if args.K_list == []: args.K_list = []
     if args.saved_models_dir is None:
         args.saved_models_dir = 'saved_models_foodinflation'
     if args.output_dir is None:
@@ -595,8 +397,6 @@ elif args.dataset_name == 'foodinflationmonthly':
     if args.epochs == -1: args.epochs = 100
     if args.N_input == -1: args.N_input = 90
     if args.N_output == -1: args.N_output = 30
-    #args.K_list = [12]
-    if args.K_list == []: args.K_list = []
     if args.saved_models_dir is None:
         args.saved_models_dir = 'saved_models_foodinflation'
     if args.output_dir is None:
@@ -616,9 +416,6 @@ elif args.dataset_name == 'foodinflationmonthly':
     if args.nkernel == -1: args.nkernel = 32
 
 
-if 1 not in args.K_list:
-    args.K_list = [1] + args.K_list
-
 print('Command Line Arguments:')
 print(args)
 
@@ -634,7 +431,7 @@ for name in args.inference_model_names:
     inference_models[name] = {}
 
 
-DUMP_PATH = '/mnt/infonas/data/pratham/Forecasting/DILATE'
+DUMP_PATH = '/mnt/infonas/data/pratham/Forecasting/TransNAR'
 args.output_dir = os.path.join(DUMP_PATH, args.output_dir)
 args.saved_models_dir = os.path.join(DUMP_PATH, args.saved_models_dir)
 os.makedirs(args.output_dir, exist_ok=True)

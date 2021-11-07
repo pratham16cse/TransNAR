@@ -14,7 +14,7 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 import time
 
 from data.synthetic_dataset import create_synthetic_dataset, create_sin_dataset, SyntheticDataset
-from data.real_dataset import parse_ECG5000, parse_Traffic, parse_Taxi, parse_Traffic911, parse_gc_datasets, parse_weather, parse_bafu, parse_meteo, parse_azure, parse_ett, parse_sin_noisy, parse_Solar, parse_etthourly, parse_m4hourly, parse_m4daily, parse_taxi30min, parse_aggtest, parse_electricity, parse_foodinflation, parse_foodinflationmonthly
+from data.real_dataset import parse_ett, parse_Solar, parse_etthourly, parse_aggtest, parse_electricity, parse_foodinflation, parse_foodinflationmonthly
 
 
 to_float_tensor = lambda x: torch.FloatTensor(x.copy())
@@ -65,7 +65,6 @@ def add_base_metrics_to_dict(
     #metrics_dict[model_name]['smape'] = metric_smape
     
     return metrics_dict
-
 
 def write_arr_to_file(
     output_dir, inf_model_name, inputs, targets, pred_mu, pred_std, pred_d, pred_v
@@ -224,209 +223,8 @@ class Normalizer(object):
 
         return data_unnorm
 
-def normalize(data, norm=None, norm_type=None, is_var=False):
-    if norm is None:
-        assert norm_type is not None
-
-        if norm_type in ['same']: # No normalization 
-            scale = np.ones_like(np.mean(data, axis=(1), keepdims=True))
-            shift = np.zeros_like(scale)
-            norm = np.concatenate([shift, scale], axis=-1)
-        if norm_type in ['avg']: # mean of entire data
-            norm = np.mean(data, axis=(0, 1))
-            scale = np.ones_like(np.mean(data, axis=(1), keepdims=True)) * norm
-            shift = np.zeros_like(scale)
-            norm = np.concatenate([shift, scale], axis=-1)
-        elif norm_type in ['avg_per_series']: # per-series mean
-            scale = np.mean(data, axis=(1), keepdims=True)
-            shift = np.zeros_like(scale)
-            norm = np.concatenate([shift, scale], axis=-1)
-        elif norm_type in ['quantile90']: # 0.9 quantile of entire data
-            scale = np.quantile(data, 0.90, axis=(0, 1))
-            shift = np.zeros_like(scale)
-            norm = np.concatenate([shift, scale], axis=-1)
-        elif norm_type in ['std']: # std of entire data
-            scale = np.std(data, axis=(0,1))
-            shift = np.zeros_like(scale)
-            norm = np.concatenate([shift, scale], axis=-1)
-        elif norm_type in ['zscore_per_series']: # z-score at each series
-            mean = np.mean(data, axis=(1), keepdims=True) # per-series mean
-            std = np.std(data, axis=(1), keepdims=True) # per-series std
-            norm = np.concatenate([mean, std], axis=-1)
-
-    if is_var:
-        data_norm = data * 1.0 / norm[ ... , :, 1:2 ]
-    else:
-        data_norm = (data - norm[...,:,0:1])* 1.0/norm[...,:,1:2]
-    #data_norm = data * 10.0/norm
-    #import ipdb
-    #ipdb.set_trace()
-    return data_norm, norm
-
-def unnormalize(data, norm, is_var):
-    if is_var:
-        data_unnorm = data * norm[ ... , : , 1:2 ]
-    else:
-        data_unnorm = data * norm[ ... , : , 1:2 ] + norm[ ... , : , 0:1 ]
-
-    return data_unnorm
-
 sqz = lambda x: np.squeeze(x, axis=-1)
 expand = lambda x: np.expand_dims(x, axis=-1)
-
-def shift_timestamp(ts, offset):
-    result = ts + offset * ts.freq
-    return pd.Timestamp(result, freq=ts.freq)
-
-def get_date_range(start, seq_len):
-    end = shift_timestamp(start, seq_len)
-    full_date_range = pd.date_range(start, end, freq=start.freq)
-    return full_date_range
-
-def get_granularity(freq_str: str):
-    """
-    Splits a frequency string such as "7D" into the multiple 7 and the base
-    granularity "D".
-
-    Parameters
-    ----------
-
-    freq_str
-        Frequency string of the form [multiple][granularity] such as "12H", "5min", "1D" etc.
-    """
-    freq_regex = r'\s*((\d+)?)\s*([^\d]\w*)'
-    m = re.match(freq_regex, freq_str)
-    assert m is not None, "Cannot parse frequency string: %s" % freq_str
-    groups = m.groups()
-    multiple = int(groups[1]) if groups[1] is not None else 1
-    granularity = groups[2]
-    return multiple, granularity
-
-class TimeFeature:
-    """
-    Base class for features that only depend on time.
-    """
-
-    def __init__(self, normalized: bool = True):
-        self.normalized = normalized
-
-    def __call__(self, index: pd.DatetimeIndex) -> np.ndarray:
-        pass
-
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
-class FourrierDateFeatures(TimeFeature):
-    def __init__(self, freq: str) -> None:
-        # reocurring freq
-        freqs = [
-            'month',
-            'day',
-            'hour',
-            'minute',
-            'weekofyear',
-            'weekday',
-            'dayofweek',
-            'dayofyear',
-            'daysinmonth',
-        ]
-
-        assert freq in freqs
-        self.freq = freq
-
-    def __call__(self, index: pd.DatetimeIndex) -> np.ndarray:
-        values = getattr(index, self.freq)
-        num_values = max(values) + 1
-        steps = [x * 2.0 * np.pi / num_values for x in values]
-        #return np.vstack([np.cos(steps), np.sin(steps)])
-        return np.stack([np.cos(steps), np.sin(steps)], axis=-1)
-
-def time_features_from_frequency_str(freq_str):
-    multiple, granularity = get_granularity(freq_str)
-
-    features = {
-        'M': ['weekofyear'],
-        'W': ['daysinmonth', 'weekofyear'],
-        'D': ['dayofweek'],
-        'B': ['dayofweek', 'dayofyear'],
-        #'H': ['hour', 'dayofweek'],
-        'H': ['hour'],
-        #'min': ['minute', 'hour', 'dayofweek'],
-        'min': ['minute', 'hour'],
-        'T': ['minute', 'hour', 'dayofweek'],
-    }
-
-    assert granularity in features, f"freq {granularity} not supported"
-
-    feature_classes= [
-        FourrierDateFeatures(freq=freq) for freq in features[granularity]
-    ]
-    return feature_classes
-
-def fit_slope_with_indices(seq, K, is_var):
-    x = np.reshape(np.ones_like(seq), (-1, K))
-    x = np.cumsum(x, axis=1) - 1
-    y = np.reshape(seq, (-1, K))
-    m_x = np.mean(x, axis=1, keepdims=True)
-    m_y = np.mean(y, axis=1, keepdims=True)
-    s_xy = np.sum((x-m_x)*(y-m_y), axis=1, keepdims=True)
-    s_xx = np.sum((x-m_x)**2, axis=1, keepdims=True)
-    #w = s_xy/s_xx
-    a = (x - m_x) / s_xx
-    #import ipdb
-    #ipdb.set_trace()
-    if is_var:
-        w = np.sum(a**2 * y, axis=1, keepdims=True)
-    else:
-        w = np.sum(a * y, axis=1, keepdims=True)
-    return w
-
-def aggregate_seqs_sum(seqs, K, is_var):
-    agg_seqs = []
-    for i, seq in enumerate(seqs):
-        #print(i, len(seqs))
-        assert len(seq)%K == 0
-        if is_var:
-            agg_seq = [(1./(K*K)) * np.sum(seq[i:i+K], axis=0) for i in range(0, len(seq), K)]
-        else:
-            agg_seq = [np.sum(seq[i:i+K], axis=0) for i in range(0, len(seq), K)]
-        agg_seqs.append(agg_seq)
-    return np.array(agg_seqs)
-
-def aggregate_seqs_slope(seqs, K, is_var=False):
-    agg_seqs = []
-    for seq in seqs:
-        assert len(seq)%K == 0
-        agg_seq = fit_slope_with_indices(seq, K, is_var)
-        agg_seqs.append(agg_seq)
-    return np.array(agg_seqs)
-
-def aggregate_data_wavelet(
-    wavelet_levels, train_input, train_target, dev_input, dev_target,
-    test_input, test_target
-):
-
-    agg_train_input = pywt.wavedec(sqz(train_input), 'haar', level=wavelet_levels, mode='periodic')
-    agg_train_target = pywt.wavedec(sqz(train_target), 'haar', level=wavelet_levels, mode='periodic')
-    agg_dev_input = pywt.wavedec(sqz(dev_input), 'haar', level=wavelet_levels, mode='periodic')
-    agg_dev_target = pywt.wavedec(sqz(dev_target), 'haar', level=wavelet_levels, mode='periodic')
-    agg_test_input = pywt.wavedec(sqz(test_input), 'haar', level=wavelet_levels, mode='periodic')
-    agg_test_target = pywt.wavedec(sqz(test_target), 'haar', level=wavelet_levels, mode='periodic')
-
-    agg_train_input = [expand(x) for x in agg_train_input]
-    agg_train_target = [expand(x) for x in agg_train_target]
-    agg_dev_input = [expand(x) for x in agg_dev_input]
-    agg_dev_target = [expand(x) for x in agg_dev_target]
-    agg_test_input = [expand(x) for x in agg_test_input]
-    agg_test_target = [expand(x) for x in agg_test_target]
-
-    #import ipdb
-    #ipdb.set_trace()
-
-    return (
-        agg_train_input, agg_train_target, agg_dev_input, agg_dev_target,
-        agg_test_input, agg_test_target
-    )
 
 def get_a(agg_type, K):
 
@@ -485,25 +283,18 @@ def aggregate_data(y, agg_type, K, is_var, a=None, v=None):
     return y_agg
 
 
-class TimeSeriesDatasetOfflineAggregate(torch.utils.data.Dataset):
-    """docstring for TimeSeriesDatasetOfflineAggregate"""
+class TimeSeriesDataset(torch.utils.data.Dataset):
+    """docstring for TimeSeriesDataset"""
     def __init__(
-        self, data, enc_len, dec_len, aggregation_type, K,
-        feats_info, which_split, tsid_map=None, input_norm=None, target_norm=None,
+        self, data, enc_len, dec_len, feats_info, which_split,
+        tsid_map=None, input_norm=None, target_norm=None,
         norm_type=None, feats_norms=None, train_obj=None
     ):
-        super(TimeSeriesDatasetOfflineAggregate, self).__init__()
+        super(TimeSeriesDataset, self).__init__()
 
-        assert enc_len%K == 0
-        assert dec_len%K == 0
-
-        print('Creating dataset:', aggregation_type, K)
-        self._base_enc_len = enc_len
-        self._base_dec_len = dec_len
-        #self.num_values = len(data[0]['target'][0])
+        self.enc_len = enc_len
+        self.dec_len = dec_len
         self.which_split = which_split
-        self.aggregation_type = aggregation_type
-        self.K = K
         self.input_norm = input_norm
         self.target_norm = target_norm
         self.norm_type = norm_type
@@ -511,11 +302,7 @@ class TimeSeriesDatasetOfflineAggregate(torch.utils.data.Dataset):
         self.tsid_map = tsid_map
         self.feats_norms = feats_norms
         #self.train_obj = train_obj
-        #self.generate_a()
-        self.a = get_a(self.aggregation_type, self.K)
-        self.S = 1
 
-        # Perform aggregation if level != 1
         st = time.time()
         data_agg = []
         for i in range(0, len(data)):
@@ -523,70 +310,16 @@ class TimeSeriesDatasetOfflineAggregate(torch.utils.data.Dataset):
             ex = data[i]['target']
             ex_f = data[i]['feats']
             ex_len = len(ex)
-            ex = ex[ ex_len%self.K: ]
-            ex_f = ex_f[ ex_len%self.K: ]
 
-            #bp = np.arange(1,len(ex), 1)
-            if which_split in ['train']:
-                bp = [(i, self.K) for i in np.arange(0, len(ex)-self.K+1, self.S)]
-            elif which_split in ['dev', 'test']:
-                bp = [(i, self.K) for i in np.arange(0, len(ex), self.K)]
+            data_agg.append(
+                {
+                    'target':ex,
+                    'feats':ex_f,
+                }
+            )
 
-            if self.K != 1:
-                ex_agg, ex_f_agg = [], []
-                for b in range(len(bp)):
-                    s, e = bp[b][0], bp[b][0]+bp[b][1]
-                    ex_agg.append(
-                        aggregate_window(
-                            ex[s:e].unsqueeze(0), self.a, False,
-                        )[0]
-                    )
-                #if self.aggregation_type in ['sum']:
-                #    for b in range(len(bp)):
-                #        s, e = bp[b][0], bp[b][0]+bp[b][1]
-                #        import ipdb ; ipdb.set_trace()
-                #        ex_agg.append(self.aggregate_data(ex[s:e]))
-
-                #elif self.aggregation_type in ['slope']:
-                #    for b in range(len(bp)):
-                #        s, e = bp[b][0], bp[b][0]+bp[b][1]
-                #        ex_agg.append(self.aggregate_data_slope(ex[s:e]))
-
-                #elif self.aggregation_type in ['haar']:
-                #    for b in range(len(bp)):
-                #        s, e = bp[b][0], bp[b][0]+bp[b][1]
-                #        ex_agg.append(self.aggregate_data_haar(ex[s:e]))
-
-                # Aggregating features
-                for b in range(len(bp)):
-                    s, e = bp[b][0], bp[b][0]+bp[b][1]
-                    ex_f_agg.append(self.aggregate_feats(ex_f[s:e]))
-
-                #if which_split in ['dev']:
-                #    import ipdb ; ipdb.set_trace()
-
-                data_agg.append(
-                    {
-                        'target':torch.cat(ex_agg, dim=0),
-                        'feats':torch.stack(ex_f_agg, dim=0),
-                    }
-                )
-
-            else:
-                ex_agg = ex
-                ex_f_agg = ex_f
-
-                data_agg.append(
-                    {
-                        'target':ex_agg,
-                        'feats':ex_f_agg,
-                    }
-                )
         et = time.time()
-        print(which_split, self.aggregation_type, self.K, 'total time:', et-st)
-
-        #if self.K>1 and which_split in ['dev']:
-        #    import ipdb ; ipdb.set_trace()
+        print(which_split, 'total time:', et-st)
 
         if self.input_norm is None:
             assert norm_type is not None
@@ -617,50 +350,15 @@ class TimeSeriesDatasetOfflineAggregate(torch.utils.data.Dataset):
             if which_split in ['train']:
                 j = 0
                 while j < len(self.data[i]['target']):
-                    if j+self.mult*self.base_enc_len+self.base_dec_len <= len(self.data[i]['target']):
+                    if j + self.enc_len + self.dec_len <= len(self.data[i]['target']):
                         self.indices.append((i, j))
                     j += 1
-                #if self.K>1:
-                #    import ipdb ; ipdb.set_trace()
             elif which_split == 'dev':
                 j = len(self.data[i]['target']) - self.enc_len - self.dec_len
                 self.indices.append((i, j))
-                #if self.K>1:
-                #    import ipdb ; ipdb.set_trace()
             elif which_split == 'test':
                 j = len(self.data[i]['target']) - self.enc_len - self.dec_len
                 self.indices.append((i, j))
-
-    @property
-    def base_enc_len(self):
-        return self._base_enc_len
-
-    @property
-    def base_dec_len(self):
-        return self._base_dec_len
-
-    @property
-    def enc_len(self):
-        if self.K > 1:
-            el = (self._base_enc_len // self.K) * self.mult
-        else:
-            el = self._base_enc_len
-        #el = self._base_enc_len
-        return el
-    
-    @property
-    def dec_len(self):
-        if self.K > 1:
-            dl = self._base_dec_len // self.K
-        else:
-            dl = self._base_dec_len
-        return dl
-
-    @property
-    def mult(self):
-        if self.K > 1: mult = 2
-        else: mult = 1
-        return mult
 
     @property
     def input_size(self):
@@ -688,17 +386,11 @@ class TimeSeriesDatasetOfflineAggregate(torch.utils.data.Dataset):
         ts_id = self.indices[idx][0]
         pos_id = self.indices[idx][1]
 
-        if self.which_split in ['train']:
-            stride, mult = self.K//self.S, self.mult
-            el = mult * self.base_enc_len // self.S
-            dl = self.base_dec_len // self.S
-        elif self.which_split in ['dev', 'test']:
-            stride, mult = 1, 1
-            el = self.enc_len
-            dl = self.dec_len
+        el = self.enc_len
+        dl = self.dec_len
 
-        ex_input = self.data[ts_id]['target'][ pos_id : pos_id+el : stride ]
-        ex_target = self.data[ts_id]['target'][ pos_id+el : pos_id+el+dl : stride ]
+        ex_input = self.data[ts_id]['target'][ pos_id : pos_id+el ]
+        ex_target = self.data[ts_id]['target'][ pos_id+el : pos_id+el+dl ]
         #print('after', ex_input.shape, ex_target.shape, ts_id, pos_id)
         if self.tsid_map is None:
             mapped_id = ts_id
@@ -707,8 +399,8 @@ class TimeSeriesDatasetOfflineAggregate(torch.utils.data.Dataset):
         ex_input = self.input_norm.normalize(ex_input, mapped_id)#.unsqueeze(-1)
         ex_target = self.target_norm.normalize(ex_target, mapped_id)#.unsqueeze(-1)
 
-        ex_input_feats = self.data[ts_id]['feats'][ pos_id : pos_id+el : stride ]
-        ex_target_feats = self.data[ts_id]['feats'][ pos_id+el : pos_id+el+dl : stride ]
+        ex_input_feats = self.data[ts_id]['feats'][ pos_id : pos_id+el ]
+        ex_target_feats = self.data[ts_id]['feats'][ pos_id+el : pos_id+el+dl ]
         ex_input_feats_norm = []
         ex_target_feats_norm = []
         for i in range(len(self.feats_info)):
@@ -759,180 +451,18 @@ class TimeSeriesDatasetOfflineAggregate(torch.utils.data.Dataset):
 
         return batched_t
 
-
-    def aggregate_data(self, values):
-        return values.mean(dim=0)
-
-    def generate_a(self):
-        x = torch.arange(self.K, dtype=torch.float)
-        m_x = x.mean()
-        s_xx = ((x-m_x)**2).sum()
-        self.a = (x - m_x) / s_xx
-
-    def aggregate_data_slope(self, y):
-        return (self.a * y).sum()
-    #def aggregate_data_slope(self, y, compute_b=False):
-    #    x = torch.arange(y.shape[0], dtype=torch.float)
-    #    m_x = x.mean()
-    #    s_xx = ((x-m_x)**2).sum()
-
-    #    #m_y = np.mean(y, axis=0)
-    #    #s_xy = np.sum((x-m_x)*(y-m_y), axis=0)
-    #    #w = s_xy/s_xx
-
-    #    a = (x - m_x) / s_xx
-    #    w = (a*y).sum()
-
-    #    if compute_b:
-    #        b = m_y - w*m_x
-    #        return w, b
-    #    else:
-    #        return w
-
-    def aggregate_feats(self, feats):
-        feats_agg = []
-        for j in range(len(self.feats_info)):
-            card = self.feats_info[j][0]
-            if card != 0:
-                feats_agg.append(feats[0,j])
-            else:
-                feats_agg.append(feats[:, j].mean())
-        feats_agg = torch.stack(feats_agg, dim=0)
-        return feats_agg
-
-    def aggregate_data_haar(self, values):
-        i = values.shape[0]//2
-        return values[i:].mean()-values[:i].mean()
-
-    def aggregate_data_wavelet(self, values, K):
-        coeffs = pywt.wavedec(sqz(values), 'haar', level=self.wavelet_levels, mode='periodic')
-        coeffs = [expand(x) for x in coeffs]
-        coeffs = coeffs[-(K-1)]
-        return coeffs
-
-    def get_time_features(self, start, seqlen):
-        end = shift_timestamp(start, seqlen)
-        full_date_range = pd.date_range(start, end, freq=start.freq)
-        chunk_range = full_date_range[ pos_id : pos_id+self._base_enc_len ]
-
-    def get_avg_date(self, date_range):
-        return date_range.mean(axis=0)
-
-    def get_avg_feats(self, time_feats):
-        return np.mean(time_feats, axis=0)
-
-    def calculate_error(self, segment):
-        w, b = self.aggregate_data_slope(segment, compute_b=True)
-        x = np.expand_dims(np.arange(len(segment)), axis=1)
-        segment_pred = w*x+b
-
-        return np.max(np.abs(segment - segment_pred)) # Using max error
-
-    def smooth(self, series):
-        #smoother = SpectralSmoother(smooth_fraction=0.4, pad_len=10)
-        smoother = ExponentialSmoother(window_len=10, alpha=0.15)
-        series = np.concatenate((np.zeros((10, 1)), series), axis=0)
-        series_smooth = np.expand_dims(smoother.smooth(series[:, 0]).smooth_data[0], axis=-1)
-        return series_smooth
-
-
 class DataProcessor(object):
     """docstring for DataProcessor"""
     def __init__(self, args):
         super(DataProcessor, self).__init__()
         self.args = args
 
-        if args.dataset_name in ['synth']:
-            # parameters
-            N = 500
-            sigma = 0.01
-    
-            # Load synthetic dataset
-            (
-                X_train_input, X_train_target,
-                X_dev_input, X_dev_target,
-                X_test_input, X_test_target,
-                train_bkp, dev_bkp, test_bkp,
-            ) = create_synthetic_dataset(N, args.N_input, args.N_output, sigma)
-    
-        elif args.dataset_name in ['sin']:
-            N = 100
-            sigma = 0.01
-    
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map
-            ) = create_sin_dataset(N, args.N_input, args.N_output, sigma)
-    
-        elif args.dataset_name in ['ECG5000']:
-            (
-                X_train_input, X_train_target,
-                X_dev_input, X_dev_target,
-                X_test_input, X_test_target,
-                train_bkp, dev_bkp, test_bkp,
-                data_train, data_dev, data_test
-            ) = parse_ECG5000(args.N_input, args.N_output)
-    
-        elif args.dataset_name in ['Traffic']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map
-            ) = parse_Traffic(args.N_input, args.N_output)
-    
-        elif args.dataset_name in ['Taxi']:
-            (
-                X_train_input, X_train_target,
-                X_dev_input, X_dev_target,
-                X_test_input, X_test_target,
-                train_bkp, dev_bkp, test_bkp,
-                data_train, data_dev, data_test
-            ) = parse_Taxi(args.N_input, args.N_output)
-    
-        elif args.dataset_name in ['Traffic911']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map,
-                feats_info, coeffs_info
-            ) = parse_Traffic911(args.N_input, args.N_output)
-        elif args.dataset_name in ['Exchange', 'Wiki']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map
-            ) = parse_gc_datasets(args.dataset_name, args.N_input, args.N_output)
-
-        elif args.dataset_name in ['weather']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map
-            ) = parse_weather(args.dataset_name, args.N_input, args.N_output)
-        elif args.dataset_name in ['bafu']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map
-            ) = parse_bafu(args.dataset_name, args.N_input, args.N_output)
-        elif args.dataset_name in ['meteo']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map
-            ) = parse_meteo(args.dataset_name, args.N_input, args.N_output)
-        elif args.dataset_name in ['azure']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map,
-                feats_info
-            ) = parse_azure(args.dataset_name, args.N_input, args.N_output, t2v_type=args.t2v_type)
-        elif args.dataset_name in ['ett']:
+        if args.dataset_name in ['ett']:
             (
                 data_train, data_dev, data_test,
                 dev_tsid_map, test_tsid_map,
                 feats_info
             ) = parse_ett(args.dataset_name, args.N_input, args.N_output, t2v_type=args.t2v_type)
-        elif args.dataset_name in ['sin_noisy']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map,
-                feats_info, coeffs_info
-            ) = parse_sin_noisy(args.dataset_name, args.N_input, args.N_output)
         elif args.dataset_name in ['Solar']:
             (
                 data_train, data_dev, data_test,
@@ -945,24 +475,6 @@ class DataProcessor(object):
                 dev_tsid_map, test_tsid_map,
                 feats_info
             ) = parse_etthourly(args.dataset_name, args.N_input, args.N_output, t2v_type=args.t2v_type)
-        elif args.dataset_name in ['m4hourly']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map,
-                feats_info, coeffs_info
-            ) = parse_m4hourly(args.dataset_name, args.N_input, args.N_output)
-        elif args.dataset_name in ['m4daily']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map,
-                feats_info, coeffs_info
-            ) = parse_m4daily(args.dataset_name, args.N_input, args.N_output)
-        elif args.dataset_name in ['taxi30min']:
-            (
-                data_train, data_dev, data_test,
-                dev_tsid_map, test_tsid_map,
-                feats_info
-            ) = parse_taxi30min(args.dataset_name, args.N_input, args.N_output, t2v_type=args.t2v_type)
         elif args.dataset_name in ['aggtest']:
             (
                 data_train, data_dev, data_test,
@@ -1002,21 +514,9 @@ class DataProcessor(object):
 
     def get_processed_data(self, args, agg_method, K):
 
-        if agg_method in ['wavelet']:
-            wavelet_levels = args.wavelet_levels
-            K_list = range(1, args.wavelet_levels+1+1+1)
-            # +1 : wavedec returns args.wavelet_levels+1 coefficients
-            # +1 : Extra slot for base values
-            # +1 : Because starting index is 1.
-        else:
-            wavelet_levels = None
-            K_list = args.K_list
- 
- 
-        #import ipdb ; ipdb.set_trace()
-        lazy_dataset_train = TimeSeriesDatasetOfflineAggregate(
+        lazy_dataset_train = TimeSeriesDataset(
             self.data_train, args.N_input, args.N_output,
-            agg_method, K, which_split='train',
+            which_split='train',
             norm_type=args.normalize,
             feats_info=self.feats_info,
         )
@@ -1031,9 +531,8 @@ class DataProcessor(object):
         #dev_norm, test_norm = np.stack(dev_norm), np.stack(test_norm)
         #import ipdb
         #ipdb.set_trace()
-        lazy_dataset_dev = TimeSeriesDatasetOfflineAggregate(
+        lazy_dataset_dev = TimeSeriesDataset(
             self.data_dev, args.N_input, args.N_output,
-            agg_method, K,
             input_norm=dev_norm, which_split='dev',
             #target_norm=Normalizer(self.data_dev, 'same'),
             target_norm=dev_norm,
@@ -1043,10 +542,9 @@ class DataProcessor(object):
             train_obj=lazy_dataset_train
         )
         print('Number of chunks in dev data:', len(lazy_dataset_dev))
-        lazy_dataset_test = TimeSeriesDatasetOfflineAggregate(
+        lazy_dataset_test = TimeSeriesDataset(
             self.data_test, args.N_input, args.N_output,
-            agg_method, K, which_split='test',
-            input_norm=test_norm,
+            input_norm=test_norm, which_split='test',
             #target_norm=test_norm,
             target_norm=Normalizer(self.data_test, 'same'),
             feats_info=self.feats_info,
@@ -1081,8 +579,6 @@ class DataProcessor(object):
             drop_last=False, num_workers=12, pin_memory=True,
             #collate_fn=lazy_dataset_test.collate_fn
         )
-        #import ipdb
-        #ipdb.set_trace()
  
         return {
             'trainloader': trainloader,
