@@ -26,6 +26,12 @@ All the datasets can be found [here](https://drive.google.com/drive/folders/1b6x
 
 Add the dataset files/directories in `data` directory before running the code.
 
+## Model Checkpoints
+
+- After training is finished, model checkpoints are saved in the `<saved_models_dir>` directory.
+- The checkpoint for dataset `<dataset_name>` and model `<model_name>` is saved at `<saved_models_dir>/<dataset_name>_<model_name>`.
+- If a model checkpoint is already present, the model will be loaded from the checkpoint run inference on the test dataset.
+
 ## Output files 
 
 ### Targets and Forecasts
