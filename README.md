@@ -17,8 +17,6 @@
 | num_grulstm_layers        | int  | >0                | -1      |
 | batch_size        | int  | >0                | -1      |
 | v_dim        | int  | >0                | -1      |
-| t2v_type        | str  | local, idx, mdh_lincomb, mdh_parti | None      |
-| K_list        | \[int,...,int \]  | \[>0,...,>0 \]               | \[\]      |
 | device        | str  | -                | None      |
 
 ## Datasets
