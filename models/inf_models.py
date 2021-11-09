@@ -11,50 +11,6 @@ import utils
 
 device = 'cuda'
 
-class DILATE(torch.nn.Module):
-    """docstring for DILATE"""
-    def __init__(self, base_models_dict, device):
-        super(DILATE, self).__init__()
-        self.base_models_dict = base_models_dict
-        self.device = device
-
-    def forward(self, feats_in_dict, inputs_dict, feats_tgt_dict, norm_dict, targets_dict=None):
-        return self.base_models_dict[1].to(self.device)(feats_in_dict[1], inputs_dict[1], feats_tgt_dict[1])
-
-class MSE(torch.nn.Module):
-    """docstring for MSE"""
-    def __init__(self, base_models_dict, device):
-        super(MSE, self).__init__()
-        self.base_models_dict = base_models_dict
-        self.device = device
-
-    def forward(self, feats_in_dict, inputs_dict, feats_tgt_dict, norm_dict, targets_dict=None):
-        return self.base_models_dict[1](feats_in_dict[1].to(self.device), inputs_dict[1].to(self.device), feats_tgt_dict[1].to(self.device))
-
-class NLL(torch.nn.Module):
-    """docstring for NLL"""
-    def __init__(self, base_models_dict, device):
-        super(NLL, self).__init__()
-        self.base_models_dict = base_models_dict
-        self.device = device
-
-    def forward(self, feats_in_dict, inputs_dict, feats_tgt_dict, norm_dict, targets_dict=None):
-        return self.base_models_dict[1](feats_in_dict[1].to(self.device), inputs_dict[1].to(self.device), feats_tgt_dict[1].to(self.device))
-
-class CNNRNN(torch.nn.Module):
-    """docstring for NLL"""
-    def __init__(self, base_models_dict, device):
-        super(CNNRNN, self).__init__()
-        self.base_models_dict = base_models_dict
-        self.device = device
-
-    def forward(self, feats_in_dict, inputs_dict, feats_tgt_dict, norm_dict, targets_dict=None):
-        return self.base_models_dict[1](
-            feats_in_dict[1].to(self.device),
-            inputs_dict[1].to(self.device),
-            feats_tgt_dict[1].to(self.device)
-        )
-
 class RNNNLLNAR(torch.nn.Module):
     """docstring for NLL"""
     def __init__(self, base_models_dict, device, is_oracle=False, covariance=False):
@@ -65,17 +21,17 @@ class RNNNLLNAR(torch.nn.Module):
         self.covariance = covariance
 
     def forward(self, dataset, norms, which_split):
-        feats_in = dataset['sum'][1][2].to(self.device)
-        inputs = dataset['sum'][1][0].to(self.device)
-        feats_tgt = dataset['sum'][1][3].to(self.device)
-        #target = dataset['sum'][1][1].to(self.device)
+        feats_in = dataset[2].to(self.device)
+        inputs = dataset[0].to(self.device)
+        feats_tgt = dataset[3].to(self.device)
+        #target = dataset[1].to(self.device)
         #if self.is_oracle:
-        #    target = dataset['sum'][1][1].to(self.device)
+        #    target = dataset[1].to(self.device)
         #else:
         #    target = None
-        ids = dataset['sum'][1][4].cpu()
+        ids = dataset[4].cpu()
 
-        mdl = self.base_models_dict['sum'][1]
+        mdl = self.base_models_dict
         with torch.no_grad():
             out = mdl(feats_in, inputs, feats_tgt)
             if mdl.is_signature:
@@ -111,23 +67,23 @@ class RNNNLLNAR(torch.nn.Module):
             )
             if which_split in ['test']:
                 raise NotImplementedError
-                pred_std = norms['sum'][1].unnormalize(pred_std[..., 0], ids=ids, is_var=True).unsqueeze(-1)
+                pred_std = norms.unnormalize(pred_std[..., 0], ids=ids, is_var=True).unsqueeze(-1)
         elif mdl.estimate_type in ['variance', 'bivariate']:
             pred_std = pred_std.cpu()
             pred_d = pred_std**2
             pred_v = torch.ones_like(pred_mu) * 1e-9
             if which_split in ['test']:
                 pred_std = torch.sqrt(
-                    norms['sum'][1].unnormalize(pred_d[..., 0], ids=ids, is_var=True).unsqueeze(-1)
+                    norms.unnormalize(pred_d[..., 0], ids=ids, is_var=True).unsqueeze(-1)
                 )
-                pred_d = norms['sum'][1].unnormalize(pred_d[..., 0], ids=ids, is_var=True).unsqueeze(-1)
+                pred_d = norms.unnormalize(pred_d[..., 0], ids=ids, is_var=True).unsqueeze(-1)
         else:
             pred_d = torch.ones_like(pred_mu) * 1e-9
             pred_v = torch.ones_like(pred_mu) * 1e-9
             pred_std = torch.ones_like(pred_mu) * 1e-9
 
         if which_split in ['test']:
-            pred_mu = norms['sum'][1].unnormalize(pred_mu[..., 0], ids=ids, is_var=False).unsqueeze(-1)
+            pred_mu = norms.unnormalize(pred_mu[..., 0], ids=ids, is_var=False).unsqueeze(-1)
 
         #import ipdb ; ipdb.set_trace()
 

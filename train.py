@@ -73,12 +73,12 @@ def train_model(
             teacher_forcing_ratio = args.teacher_forcing_ratio
             #teacher_force = True if random.random() <= teacher_forcing_ratio else False
             if model_name in [
-                'trans-nll-atr', 'rnn-mse-ar', 'rnn-nll-ar',
-                'gpt-nll-ar', 'gpt-mse-ar'
+                'rnn-mse-ar', 'rnn-nll-ar', 'gpt-nll-ar', 'gpt-mse-ar'
             ]:
                 teacher_force = True
             else:
                 teacher_force = False
+
             out = net(
                 feats_in.to(args.device), inputs.to(args.device),
                 feats_tgt.to(args.device), target.to(args.device),
@@ -103,14 +103,6 @@ def train_model(
                 elif net.estimate_type in ['bivariate']:
                     means, stds, rho = out
 
-            loss_mse,loss_shape,loss_temporal = torch.tensor(0),torch.tensor(0),torch.tensor(0)
-
-
-            if model_name in ['seq2seqdilate']:
-                raise NotImplementedError
-                loss, loss_shape, loss_temporal = dilate_loss(
-                    target, means, args.alpha, args.gamma, args.device
-                )
             if net.estimate_type == 'covariance':
                 order = torch.randperm(target.shape[1])
                 means_shuffled = torch.cat(
@@ -148,10 +140,10 @@ def train_model(
                 loss = torch.mean(-dist.log_prob(target))
                 loss += torch.mean(-dist_avg.log_prob(target_avg))
                 #import ipdb ; ipdb.set_trace()
+
             if net.is_signature:
                 sig_loss = torch.mean(1. - cos_sim(dec_state, sig_state))
                 loss += sig_loss
-
 
             epoch_loss += loss.item()
 
@@ -173,10 +165,6 @@ def train_model(
                 )= eval_base_model(
                     args, model_name, net, devloader, norm, args.gamma, verbose=1
                 )
-
-                if model_name in ['seq2seqdilate']:
-                    raise NotImplementedError
-                    metric = metric_dilate
 
                 if net.estimate_type in ['point']:
                     metric = metric_mse
@@ -202,9 +190,6 @@ def train_model(
                 scheduler.step(metric)
 
                 # ...log the metrics
-                if model_name in ['seq2seqdilate']:
-                    raise NotImplementedError
-                    writer.add_scalar('dev_metrics/dilate', metric_dilate, curr_step)
                 writer.add_scalar('dev_metrics/crps', metric_crps, curr_step)
                 writer.add_scalar('dev_metrics/mae', metric_mae, curr_step)
                 writer.add_scalar('dev_metrics/mse', metric_mse, curr_step)
@@ -215,11 +200,7 @@ def train_model(
                 break
 
         # ...log the epoch_loss
-        if model_name in ['seq2seqdilate']:
-            raise NotImplementedError
-            writer.add_scalar('training_loss/DILATE', epoch_loss, curr_epoch)
         writer.add_scalar('training_time/epoch_time', epoch_time, curr_epoch)
-
 
         if(verbose):
             if (curr_step % args.print_every == 0):

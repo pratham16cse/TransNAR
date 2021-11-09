@@ -512,7 +512,7 @@ class DataProcessor(object):
         self.feats_info = feats_info
 
 
-    def get_processed_data(self, args, agg_method, K):
+    def get_processed_data(self, args):
 
         lazy_dataset_train = TimeSeriesDataset(
             self.data_train, args.N_input, args.N_output,

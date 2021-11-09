@@ -132,18 +132,6 @@ def eval_base_model(args, model_name, net, loader, norm, gamma, verbose=1, unnor
     # DTW and TDI
     loss_dtw, loss_tdi = 0,0
     M = target.shape[0]
-    #for k in range(M):
-    #    print(k)
-    #    target_k_cpu = target[k,:,0:1].view(-1).detach().cpu().numpy()
-    #    output_k_cpu = pred_mu[k,:,0:1].view(-1).detach().cpu().numpy()
-
-    #    loss_dtw += dtw(target_k_cpu,output_k_cpu)
-    #    path, sim = dtw_path(target_k_cpu, output_k_cpu)
-
-    #    Dist = 0
-    #    for i,j in path:
-    #            Dist += (i-j)*(i-j)
-    #    loss_tdi += Dist / (N_output*N_output)
 
     loss_dtw = loss_dtw / M
     loss_tdi = loss_tdi / M
@@ -217,29 +205,17 @@ def eval_inf_model(args, net, dataset, which_split, gamma, verbose=1):
     criterion_mae = torch.nn.L1Loss()
 
     num_batches = 0
-    for _ in dataset['sum'][1][loader_str]:
+    for _ in dataset[loader_str]:
         num_batches += 1
 
-    iters = {}
-    for agg_method in args.aggregate_methods:
-        iters[agg_method] = {}
-        for K in args.K_list:
-            iters[agg_method][K] = iter(dataset[agg_method][K][loader_str])
+    iters = iter(dataset[loader_str])
 
-    norms = {}
-    for agg_method in args.aggregate_methods:
-        norms[agg_method] = {}
-        for K in args.K_list:
-            norms[agg_method][K] = dataset[agg_method][K][norm_str]
+    norms = dataset[norm_str]
 
     inputs, mapped_ids, target, pred_mu, pred_d, pred_v, pred_std = [], [], [], [], [], [], []
     start_time = time.time()
     for i in range(num_batches):
-        dataset_batch = {}
-        for agg_method in args.aggregate_methods:
-            dataset_batch[agg_method] = {}
-            for K in args.K_list:
-                dataset_batch[agg_method][K] = iters[agg_method][K].next()
+        dataset_batch = iters.next()
 
         #import ipdb ; ipdb.set_trace()
         print('Batch id:', i, num_batches)
@@ -247,15 +223,15 @@ def eval_inf_model(args, net, dataset, which_split, gamma, verbose=1):
             dataset_batch, norms, which_split
         )
 
-        batch_target = dataset_batch['sum'][1][1]
+        batch_target = dataset_batch[1]
 
         pred_mu.append(batch_pred_mu.cpu())
         pred_d.append(batch_pred_d.cpu())
         pred_v.append(batch_pred_v.cpu())
         pred_std.append(batch_pred_std.cpu())
         target.append(batch_target.cpu())
-        inputs.append(dataset_batch['sum'][1][0])
-        mapped_ids.append(dataset_batch['sum'][1][4])
+        inputs.append(dataset_batch[0])
+        mapped_ids.append(dataset_batch[4])
 
     end_time = time.time()
 
@@ -267,12 +243,12 @@ def eval_inf_model(args, net, dataset, which_split, gamma, verbose=1):
 
     inputs = torch.cat(inputs, dim=0)
     mapped_ids = torch.cat(mapped_ids, dim=0)
-    inputs = dataset['sum'][1][norm_str].unnormalize(
+    inputs = dataset[norm_str].unnormalize(
         inputs[..., 0], ids=mapped_ids
     )
     #import ipdb ; ipdb.set_trace()
     #if which_split in ['dev']:
-    #    target = dataset['sum'][1][norm_str].unnormalize(
+    #    target = dataset[norm_str].unnormalize(
     #        target[..., 0], ids=mapped_ids
     #    ).unsqueeze(-1)
 

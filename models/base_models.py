@@ -1006,11 +1006,10 @@ class RNNARModel(nn.Module):
 
 
 def get_base_model(
-    args, base_model_name, level, N_input, N_output,
+    args, base_model_name, N_input, N_output,
     input_size, output_size, estimate_type, feats_info
 ):
 
-    #hidden_size = max(int(config['hidden_size']*1.0/int(np.sqrt(level))), args.fc_units)
     hidden_size = args.hidden_size
 
     if base_model_name in ['rnn-mse-nar', 'rnn-nll-nar', 'rnn-fnll-nar']:
